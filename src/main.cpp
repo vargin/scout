@@ -1,10 +1,17 @@
+extern "C" {
 #include "ets_sys.h"
 #include "osapi.h"
 #include "gpio.h"
 #include "os_type.h"
+}
 
 static const int pin = 1;
-static volatile os_timer_t some_timer;
+static os_timer_t some_timer;
+
+extern "C" {
+  void ets_timer_setfn(ETSTimer *ptimer, ETSTimerFunc *pfunction, void *parg);
+  void ets_timer_arm_new(ETSTimer *ptimer,uint32_t milliseconds, bool repeat_flag, bool);
+}
 
 void some_timerfunc(void *arg) {
   //Do blinky stuff
@@ -18,7 +25,7 @@ void some_timerfunc(void *arg) {
   }
 }
 
-void ICACHE_FLASH_ATTR user_init() {
+extern "C" void ICACHE_FLASH_ATTR user_init() {
   // init gpio sussytem
   gpio_init();
 
