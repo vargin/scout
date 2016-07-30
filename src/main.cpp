@@ -1,39 +1,74 @@
-extern "C" {
-#include "ets_sys.h"
-#include "osapi.h"
-#include "gpio.h"
-#include "os_type.h"
+#include <Arduino.h>
+#include <ESP8266WiFi.h>
+#include <WiFiClient.h>
+#include <ESP8266WebServer.h>
+#include <ESP8266mDNS.h>
+
+const char *ssid = "";
+const char *password = "";
+MDNSResponder mdns;
+
+ESP8266WebServer server(80);
+
+const int led = 15;
+
+void handleRoot() {
+  digitalWrite(led, 1);
+  server.send(200, "text/html", "<html><head><title>Mega Title</title></head><body><p><b>Hello</b></p></body></html>");
+  digitalWrite(led, 0);
 }
 
-static const int pin = 1;
-static os_timer_t some_timer;
-
-extern "C" {
-  void ets_timer_setfn(ETSTimer *ptimer, ETSTimerFunc *pfunction, void *parg);
-  void ets_timer_arm_new(ETSTimer *ptimer,uint32_t milliseconds, bool repeat_flag, bool);
-}
-
-void some_timerfunc(void *arg) {
-  //Do blinky stuff
-  if (GPIO_REG_READ(GPIO_OUT_ADDRESS) & (1 << pin)) {
-    // set gpio low
-    gpio_output_set(0, (1 << pin), 0, 0);
+void handleNotFound() {
+  digitalWrite(led, 1);
+  String message = "File Not Found\n\n";
+  message += "URI: ";
+  message += server.uri();
+  message += "\nMethod: ";
+  message += (server.method() == HTTP_GET) ? "GET" : "POST";
+  message += "\nArguments: ";
+  message += server.args();
+  message += "\n";
+  for (uint8_t i = 0; i < server.args(); i++) {
+    message += " " + server.argName(i) + ": " + server.arg(i) + "\n";
   }
-  else {
-    // set gpio high
-    gpio_output_set((1 << pin), 0, 0, 0);
-  }
+  server.send(404, "text/plain", message);
+  digitalWrite(led, 0);
 }
 
-extern "C" void ICACHE_FLASH_ATTR user_init() {
-  // init gpio sussytem
-  gpio_init();
+void setup(void) {
+  pinMode(led, OUTPUT);
+  digitalWrite(led, 0);
+  Serial.begin(115200);
+  WiFi.begin(ssid, password);
+  Serial.println("");
 
-  // configure UART TXD to be GPIO1, set as output
-  PIN_FUNC_SELECT(PERIPHS_IO_MUX_U0TXD_U, FUNC_GPIO1);
-  gpio_output_set(0, 0, (1 << pin), 0);
+  // Wait for connection
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("");
+  Serial.print("Connected to ");
+  Serial.println(ssid);
+  Serial.print("IP address: ");
+  Serial.println(WiFi.localIP());
 
-  // setup timer (500ms, repeating)
-  os_timer_setfn(&some_timer, (os_timer_func_t *) some_timerfunc, NULL);
-  os_timer_arm(&some_timer, 300, 1);
+  if (mdns.begin("esp8266", WiFi.localIP())) {
+    Serial.println("MDNS responder started");
+  }
+
+  server.on("/", handleRoot);
+
+  server.on("/inline", []() {
+    server.send(200, "text/plain", "this works as well");
+  });
+
+  server.onNotFound(handleNotFound);
+
+  server.begin();
+  Serial.println("HTTP server started");
+}
+
+void loop(void) {
+  server.handleClient();
 }
