@@ -363,13 +363,13 @@ uint8_t Radio::read_payload(void *buf, uint8_t data_len) {
 void Radio::csnLow(void) {
   // Discharge SCK->CSN RC.
   digitalWrite(SPI_SCK, LOW);
-  delayMicroseconds(60);
+  delayMicroseconds(120);
 }
 
 void Radio::csnHigh(void) {
   // Charge SCK->CSN RC.
   digitalWrite(SPI_SCK, HIGH);
-  delayMicroseconds(60);
+  delayMicroseconds(120);
 }
 
 uint8_t Radio::flush_rx(void) {

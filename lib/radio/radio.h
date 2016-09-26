@@ -407,6 +407,21 @@ public:
    */
   void read(void* buf, uint8_t len);
 
+  /**
+   * Empty the receive buffer
+   *
+   * @return Current value of status register
+   */
+  uint8_t flush_rx(void);
+
+  /**
+   * Empty the transmit buffer. This is generally not required in standard operation.
+   * May be required in specific cases after stopListening() , if operating at 250KBPS data rate.
+   *
+   * @return Current value of status register
+   */
+  uint8_t flush_tx(void);
+
 private:
   uint32_t txRxDelay; /**< Var for adjusting delays depending on datarate */
 
@@ -434,21 +449,6 @@ private:
 
   void csnLow(void);
   void csnHigh(void);
-
-  /**
-  * Empty the receive buffer
-  *
-  * @return Current value of status register
-  */
-  uint8_t flush_rx(void);
-
-  /**
-   * Empty the transmit buffer. This is generally not required in standard operation.
-   * May be required in specific cases after stopListening() , if operating at 250KBPS data rate.
-   *
-   * @return Current value of status register
-   */
-  uint8_t flush_tx(void);
 
   /**
    * This function is mainly used internally to take advantage of the auto payload
