@@ -2,51 +2,48 @@
 #include <ESP8266WiFi.h>
 #include <ESP8266mDNS.h>
 #include <WiFiUdp.h>
-#include <ESP8266WebServer.h>
+#include <ESP8266HTTPClient.h>
 #include <ArduinoOTA.h>
 #include "halfduplexspi.h"
 #include <radio.h>
 
-MDNSResponder mdns;
 Radio radio;
 
-const uint8_t pir_pin = 13;
-
-const char* ssid = "";
-const char* password = "";
+uint8_t counter = 0;
 
 const uint8_t txPipe[5] = {0x71, 0xCD, 0xAB, 0xCD, 0xAB};
 const uint8_t rxPipe[5] = {0x7C, 0x68, 0x52, 0x4d, 0x54};
-uint8_t rxData[6] = {"-----"};
-uint8_t data[6] = {"_PONG"};
+
+const uint8_t data[5] = {80, 79, 78, 71, 0};
+uint8_t rxData[5] = {0, 0, 0, 0, 0};
+
 const uint32_t timeoutPeriod = 3000;
 
-ESP8266WebServer server(80);
+void beep(unsigned char delayMs) {
+  // Almost any value can be used except 0 and 255.
+  analogWrite(15, 800);
+  // Wait for a delayMs ms.
+  delay(delayMs);
+  // 0 turns it off.
+  analogWrite(15, 0);
 
-void handleRoot() {
-  int read = analogRead(A0);
-  String response = "<html><head><title>Sensor</title></head><body><p><b>";
-  response += String(read);
-  response += "</b></p></body></html>";
-  server.send(200, "text/html", response);
+  // Wait for a delayMs ms.
+  delay(delayMs);
 }
 
 void setup() {
-  //pinMode(A0, INPUT);
-
   Serial.begin(115200);
   Serial.println("Booting");
+  Serial.println(WIFI_SSID);
+  Serial.println(WIFI_PASSWORD);
+
   WiFi.mode(WIFI_STA);
 
-  WiFi.begin(ssid, password);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   while (WiFi.waitForConnectResult() != WL_CONNECTED) {
     Serial.println("Connection Failed! Rebooting...");
     delay(5000);
     ESP.restart();
-  }
-
-  if (mdns.begin("azesp", WiFi.localIP())) {
-    Serial.println("MDNS responder started");
   }
 
   ArduinoOTA.onStart([]() {
@@ -75,11 +72,6 @@ void setup() {
   Serial.print("IP address: ");
   Serial.println(WiFi.localIP());
 
-  server.on("/", handleRoot);
-
-  server.begin();
-  Serial.println("HTTP server started");
-
   uint8_t result, registerAddress, registerIndex;
 
   if (radio.setup()) {
@@ -92,13 +84,14 @@ void setup() {
   radio.setOutputPower(OutputPower::POWER_HIGH);
 
   if (radio.setDataRate(DataRate::RATE_250KBPS)) {
-    Serial.println("True + Module!");
+    Serial.println("nRF24L01+ is verified!");
   } else {
-    Serial.println("Panic!!!! It's not true + module");
+    Serial.println("This is not nRF24L01+ module!");
   }
 
   radio.setAutoAck(1);
   radio.setRetries(2, 15);
+
   radio.openWritingPipe(txPipe);
   radio.openReadingPipe(rxPipe);
   radio.startListening();
@@ -108,37 +101,76 @@ void setup() {
 
 void loop() {
   ArduinoOTA.handle();
-  server.handleClient();
 
-  //int read = analogRead(A0);
-  //Serial.println("+");
+  if (!radio.available()) {
+    Serial.println(WiFi.localIP());
+    delay(1000);
+    return;
+  }
 
-  Serial.println(WiFi.localIP());
+  radio.read(&rxData, 5);
 
-  if (radio.available()) {
-    radio.read(&rxData, 6);
+  Serial.println("Message received: ");
+  Serial.println((const char *) rxData);
 
-    Serial.println("Message received: ");
-    Serial.println((const char *)rxData);
+  if (rxData[0] == 80 && rxData[1] == 73 && rxData[2] == 78 && rxData[3] == 71 && rxData[4] == 0) {
+    counter++;
 
-    radio.openWritingPipe(rxPipe);
-    radio.openReadingPipe(txPipe);
+    radio.openWritingPipe(txPipe);
+    radio.openReadingPipe(rxPipe);
     radio.stopListening();
 
-    data[0] = rxData[0];
+    for (uint8_t counter = 0; counter < 6; counter++) {
+      if (!radio.writeBlocking(&data, 5, timeoutPeriod)) {
+        Serial.println("Message has not been sent");
+      } else {
+        // Play music
+        Serial.println("Message has been sent!");
+      }
 
-    if (!radio.writeBlocking(&data, 6, timeoutPeriod)) {
-      Serial.println("Message timed out!");
-    } else {
-      Serial.println("Message successfully sent!");
+      beep(50);
+      beep(50);
+      beep(200);
+      beep(50);
+      beep(50);
+
+      delay(200);
     }
+
+    for (uint8_t counter = 0; counter < 10; counter++) {
+      beep(50);
+      beep(50);
+      beep(200);
+      beep(50);
+      beep(50);
+
+      delay(1000);
+    }
+
+    radio.flush_rx();
 
     radio.openWritingPipe(txPipe);
     radio.openReadingPipe(rxPipe);
     radio.startListening();
-  } else {
-    Serial.println("No data is received!");
   }
 
-  delay(1000);
+  Serial.println("Sending HTTP POST request....");
+
+  HTTPClient http;
+  http.begin("http://things.ubidots.com/api/v1.6/variables/57efb7e57625424e32b6b474/values");
+  http.addHeader("Content-Type", "application/json");
+  http.addHeader("X-Auth-Token", UBIDOTS_AUTH_KEY);
+  http.addHeader("NULL", "NULL");
+
+  String data = "{\"value\": ";
+  data += counter;
+  data += "}";
+
+  http.POST(data);
+  http.writeToStream(&Serial);
+  http.end();
+
+  Serial.println("HTTP POST request has been sent.");
+
+  rxData[0] = rxData[1] = rxData[2] = rxData[3] = rxData[4] = 0;
 }
