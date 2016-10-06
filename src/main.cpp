@@ -10,6 +10,10 @@
 Radio radio;
 
 uint8_t counter = 0;
+// Variable is used to count main loop cycles when WiFi is powered up. WiFi is powered up initially and turned off after
+// 10 cycles (mostly to allow OTA), then once radio receives a message WiFi is turned on again, does the job and turned
+// off again.
+uint8_t wifiPowerUpCycles = 0;
 
 const uint8_t txPipe[5] = {0x71, 0xCD, 0xAB, 0xCD, 0xAB};
 const uint8_t rxPipe[5] = {0x7C, 0x68, 0x52, 0x4d, 0x54};
@@ -31,21 +35,38 @@ void beep(unsigned char delayMs) {
   delay(delayMs);
 }
 
-void setup() {
-  Serial.begin(115200);
-  Serial.println("Booting");
-  Serial.println(WIFI_SSID);
-  Serial.println(WIFI_PASSWORD);
+void connectToWiFi() {
+  WiFi.forceSleepWake();
 
   WiFi.mode(WIFI_STA);
 
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+
   while (WiFi.waitForConnectResult() != WL_CONNECTED) {
     Serial.println("Connection Failed! Rebooting...");
     delay(5000);
     ESP.restart();
   }
+}
 
+void disconnectFromWiFi() {
+  WiFi.disconnect(true);
+  WiFi.forceSleepBegin();
+}
+
+void playAlarm(uint8_t times = 1) {
+  for (uint8_t counter = 0; counter < times; counter++) {
+    beep(50);
+    beep(50);
+    beep(200);
+    beep(50);
+    beep(50);
+
+    delay(300);
+  }
+}
+
+void setupOTA() {
   ArduinoOTA.onStart([]() {
     Serial.println("Start");
   });
@@ -68,12 +89,9 @@ void setup() {
   });
 
   ArduinoOTA.begin();
-  Serial.println("Ready");
-  Serial.print("IP address: ");
-  Serial.println(WiFi.localIP());
+}
 
-  uint8_t result, registerAddress, registerIndex;
-
+void setupRadio() {
   if (radio.setup()) {
     Serial.println("nRF24L01+ is set up and ready!");
   } else {
@@ -99,11 +117,39 @@ void setup() {
   radio.powerUp();
 }
 
+void setup() {
+  // Allow entire circuitry to power up.
+  delay(1000);
+
+  Serial.begin(115200);
+
+  Serial.println("Booting...");
+
+  connectToWiFi();
+
+  setupOTA();
+
+  delay(1000);
+
+  setupRadio();
+
+  Serial.println("Booted!");
+}
+
 void loop() {
-  ArduinoOTA.handle();
+  if (WiFi.isConnected()) {
+    ArduinoOTA.handle();
+    Serial.println(WiFi.localIP());
+
+    wifiPowerUpCycles++;
+
+    if (wifiPowerUpCycles >= 30) {
+      wifiPowerUpCycles = 0;
+      disconnectFromWiFi();
+    }
+  }
 
   if (!radio.available()) {
-    Serial.println(WiFi.localIP());
     delay(1000);
     return;
   }
@@ -120,32 +166,17 @@ void loop() {
     radio.openReadingPipe(rxPipe);
     radio.stopListening();
 
-    for (uint8_t counter = 0; counter < 6; counter++) {
+    for (uint8_t counter = 0; counter < 4; counter++) {
       if (!radio.writeBlocking(&data, 5, timeoutPeriod)) {
         Serial.println("Message has not been sent");
       } else {
-        // Play music
         Serial.println("Message has been sent!");
       }
 
-      beep(50);
-      beep(50);
-      beep(200);
-      beep(50);
-      beep(50);
-
-      delay(200);
+      playAlarm();
     }
 
-    for (uint8_t counter = 0; counter < 10; counter++) {
-      beep(50);
-      beep(50);
-      beep(200);
-      beep(50);
-      beep(50);
-
-      delay(1000);
-    }
+    playAlarm(20);
 
     radio.flush_rx();
 
@@ -153,6 +184,8 @@ void loop() {
     radio.openReadingPipe(rxPipe);
     radio.startListening();
   }
+
+  connectToWiFi();
 
   Serial.println("Sending HTTP POST request....");
 
@@ -173,4 +206,6 @@ void loop() {
   Serial.println("HTTP POST request has been sent.");
 
   rxData[0] = rxData[1] = rxData[2] = rxData[3] = rxData[4] = 0;
+
+  disconnectFromWiFi();
 }
